@@ -1,0 +1,217 @@
+package liberty.tools.mpls;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
+import org.eclipse.core.runtime.ICoreRunnable;
+import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.NullProgressMonitor;
+import org.eclipse.core.runtime.jobs.Job;
+import org.eclipse.jdt.core.JavaModelException;
+import org.eclipse.lsp4e.LanguageClientImpl;
+import org.eclipse.lsp4j.CodeAction;
+import org.eclipse.lsp4j.CodeLens;
+import org.eclipse.lsp4j.CompletionList;
+import org.eclipse.lsp4j.Hover;
+import org.eclipse.lsp4j.Location;
+import org.eclipse.lsp4j.PublishDiagnosticsParams;
+import org.eclipse.lsp4j.jsonrpc.CancelChecker;
+import org.eclipse.lsp4j.jsonrpc.CompletableFutures;
+import org.eclipse.lsp4mp.commons.JavaFileInfo;
+import org.eclipse.lsp4mp.commons.MicroProfileDefinition;
+import org.eclipse.lsp4mp.commons.MicroProfileJavaCodeActionParams;
+import org.eclipse.lsp4mp.commons.MicroProfileJavaCodeLensParams;
+import org.eclipse.lsp4mp.commons.MicroProfileJavaCompletionParams;
+import org.eclipse.lsp4mp.commons.MicroProfileJavaDefinitionParams;
+import org.eclipse.lsp4mp.commons.MicroProfileJavaDiagnosticsParams;
+import org.eclipse.lsp4mp.commons.MicroProfileJavaFileInfoParams;
+import org.eclipse.lsp4mp.commons.MicroProfileJavaHoverParams;
+import org.eclipse.lsp4mp.commons.MicroProfileJavaProjectLabelsParams;
+import org.eclipse.lsp4mp.commons.MicroProfileProjectInfo;
+import org.eclipse.lsp4mp.commons.MicroProfileProjectInfoParams;
+import org.eclipse.lsp4mp.commons.MicroProfilePropertyDefinitionParams;
+import org.eclipse.lsp4mp.commons.ProjectLabelInfoEntry;
+import org.eclipse.lsp4mp.jdt.core.IMicroProfilePropertiesChangedListener;
+import org.eclipse.lsp4mp.jdt.core.MicroProfileCorePlugin;
+import org.eclipse.lsp4mp.jdt.core.ProjectLabelManager;
+import org.eclipse.lsp4mp.jdt.core.PropertiesManager;
+import org.eclipse.lsp4mp.jdt.core.PropertiesManagerForJava;
+import org.eclipse.lsp4mp.jdt.internal.core.ls.JDTUtilsLSImpl;
+import org.eclipse.lsp4mp.ls.api.MicroProfileLanguageClientAPI;
+import org.eclipse.lsp4mp.ls.api.MicroProfileLanguageServerAPI;
+
+import liberty.tools.LibertyDevPlugin;
+
+/**
+ * LSP4E MicroProfile language client.
+ * 
+ * @author Angelo ZERR
+ *
+ */
+public class LibertyMPLSClientImpl extends LanguageClientImpl implements MicroProfileLanguageClientAPI {
+
+	private static IMicroProfilePropertiesChangedListener SINGLETON_LISTENER;
+
+	private IMicroProfilePropertiesChangedListener listener = event -> {
+		((MicroProfileLanguageServerAPI) getLanguageServer()).propertiesChanged(event);
+	};
+
+/*	public LibertyMPLSClientImpl() {
+		// FIXME : how to remove the listener????
+		// The listener should be removed when language server is shutdown, how to
+		// manage that????
+		if (SINGLETON_LISTENER != null) {
+			MicroProfileCorePlugin.getDefault().removeMicroProfilePropertiesChangedListener(SINGLETON_LISTENER);
+		}
+		SINGLETON_LISTENER = listener;
+		MicroProfileCorePlugin.getDefault().addMicroProfilePropertiesChangedListener(listener);
+	} */
+
+	public LibertyMPLSClientImpl() {
+		// FIXME : how to remove the listener????
+		// The listener should be removed when language server is shutdown, how to
+		// manage that????
+		if (SINGLETON_LISTENER != null) {
+			MicroProfileCorePlugin.getDefault().removeMicroProfilePropertiesChangedListener(SINGLETON_LISTENER);
+		}
+		SINGLETON_LISTENER = listener;
+		MicroProfileCorePlugin.getDefault().addMicroProfilePropertiesChangedListener(listener);
+	}
+
+	@Override
+	public CompletableFuture<MicroProfileProjectInfo> getProjectInfo(MicroProfileProjectInfoParams params) {
+		return CompletableFutures.computeAsync((cancelChecker) -> {
+			final MicroProfileProjectInfo[] projectInfo = new MicroProfileProjectInfo[1];
+			Job job = Job.create("MicroProfile properties collector", (ICoreRunnable) monitor -> {
+				projectInfo[0] = PropertiesManager.getInstance().getMicroProfileProjectInfo(params,
+						JDTUtilsLSImpl.getInstance(), monitor);
+			});
+			job.schedule();
+			try {
+				job.join();
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+			return projectInfo[0];
+		});
+
+	}
+
+	private IProgressMonitor getProgressMonitor(CancelChecker cancelChecker) {
+		IProgressMonitor monitor = new NullProgressMonitor() {
+			public boolean isCanceled() {
+				cancelChecker.checkCanceled();
+				return false;
+			};
+		};
+		return monitor;
+	}
+
+	@Override
+	public CompletableFuture<Location> getPropertyDefinition(MicroProfilePropertyDefinitionParams params) {
+		// TODO : implements the MicroProfile definition when LSP4E will support JDT LS
+		// syntax uri -> see // https://bugs.eclipse.org/bugs/show_bug.cgi?id=551625
+		return CompletableFuture.completedFuture(null);
+	}
+
+	@Override
+	public CompletableFuture<List<? extends CodeLens>> getJavaCodelens(MicroProfileJavaCodeLensParams javaParams) {
+		return CompletableFutures.computeAsync((cancelChecker) -> {
+			IProgressMonitor monitor = getProgressMonitor(cancelChecker);
+			try {
+				return PropertiesManagerForJava.getInstance().codeLens(javaParams, JDTUtilsLSImpl.getInstance(), monitor);
+			} catch (JavaModelException e) {
+				//MicroProfileLSPPlugin.logException(e.getLocalizedMessage(), e);
+				return Collections.emptyList();
+			}
+		});
+	}
+
+	@Override
+	public CompletableFuture<List<PublishDiagnosticsParams>> getJavaDiagnostics(
+			MicroProfileJavaDiagnosticsParams javaParams) {
+		return CompletableFutures.computeAsync((cancelChecker) -> {
+			IProgressMonitor monitor = getProgressMonitor(cancelChecker);
+			try {
+				return PropertiesManagerForJava.getInstance().diagnostics(javaParams, JDTUtilsLSImpl.getInstance(),
+						monitor);
+			} catch (JavaModelException e) {
+				//MicroProfileLSPPlugin.logException(e.getLocalizedMessage(), e);
+				return Collections.emptyList();
+			}
+		});
+	}
+
+	@Override
+	public CompletableFuture<List<CodeAction>> getJavaCodeAction(MicroProfileJavaCodeActionParams javaParams) {
+		return CompletableFutures.computeAsync((cancelChecker) -> {
+			IProgressMonitor monitor = getProgressMonitor(cancelChecker);
+			try {
+				return (List<CodeAction>) PropertiesManagerForJava.getInstance().codeAction(javaParams,
+						JDTUtilsLSImpl.getInstance(), monitor);
+			} catch (JavaModelException e) {
+				//MicroProfileLSPPlugin.logException(e.getLocalizedMessage(), e);
+				return Collections.emptyList();
+			}
+		});
+	}
+
+	@Override
+	public CompletableFuture<ProjectLabelInfoEntry> getJavaProjectlabels(
+			MicroProfileJavaProjectLabelsParams javaParams) {
+		return CompletableFutures.computeAsync((cancelChecker) -> {
+			IProgressMonitor monitor = getProgressMonitor(cancelChecker);
+			return ProjectLabelManager.getInstance().getProjectLabelInfo(javaParams, JDTUtilsLSImpl.getInstance(),
+					monitor);
+		});
+	}
+	
+	@Override
+	public CompletableFuture<JavaFileInfo> getJavaFileInfo(MicroProfileJavaFileInfoParams javaParams) {
+		return CompletableFutures.computeAsync(cancelChecker -> {
+			IProgressMonitor monitor = getProgressMonitor(cancelChecker);
+			return PropertiesManagerForJava.getInstance().fileInfo(javaParams, JDTUtilsLSImpl.getInstance(), monitor);
+		});
+	}
+
+	@Override
+	public CompletableFuture<List<MicroProfileDefinition>> getJavaDefinition(
+			MicroProfileJavaDefinitionParams javaParams) {
+		return CompletableFutures.computeAsync(cancelChecker -> {
+			IProgressMonitor monitor = getProgressMonitor(cancelChecker);
+			try {
+				return PropertiesManagerForJava.getInstance().definition(javaParams, JDTUtilsLSImpl.getInstance(), monitor);
+			} catch (JavaModelException e) {
+				//LibertyDevPlugin.logException(e.getLocalizedMessage(), e);
+				return null;
+			}
+		});
+	}
+
+	@Override
+	public CompletableFuture<CompletionList> getJavaCompletion(MicroProfileJavaCompletionParams javaParams) {
+		return CompletableFutures.computeAsync(cancelChecker -> {
+			IProgressMonitor monitor = getProgressMonitor(cancelChecker);
+			try {
+				return PropertiesManagerForJava.getInstance().completion(javaParams, JDTUtilsLSImpl.getInstance(), monitor);
+			} catch (JavaModelException e) {
+				//QuarkusLSPPlugin.logException(e.getLocalizedMessage(), e);
+				return null;
+			}
+		});
+	}
+	
+	@Override
+	public CompletableFuture<Hover> getJavaHover(MicroProfileJavaHoverParams javaParams) {
+		return CompletableFutures.computeAsync((cancelChecker) -> {
+			IProgressMonitor monitor = getProgressMonitor(cancelChecker);
+			try {
+				return PropertiesManagerForJava.getInstance().hover(javaParams, JDTUtilsLSImpl.getInstance(), monitor);
+			} catch (JavaModelException e) {
+				//QuarkusLSPPlugin.logException(e.getLocalizedMessage(), e);
+				return null;
+			}	
+		});
+	}
+}
